@@ -2,11 +2,11 @@ import asyncio
 import logging
 import os
 import sqlite3
-from typing import Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
-from aiogram import Bot, Dispatcher, F, Router
+from aiogram import BaseMiddleware, Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiogram.enums import ChatMemberStatus, ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -18,7 +18,7 @@ from aiogram.types import (
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
+    TelegramObject,
 )
 
 # ================= КОНФИГУРАЦИЯ (ДЛЯ RAILWAY) =================
@@ -32,11 +32,110 @@ ADMIN_IDS = [
 # Путь к БД (если на Railway подключен Volume, укажи например /data/standrazval.db)
 DB_PATH = os.getenv("DB_PATH", "standrazval.db")
 
+# Обязательные каналы для подписки (бот должен быть админом в этих каналах!)
+REQUIRED_CHANNELS = [
+    {"chat_id": "@highreverse", "title": "highreverse", "url": "https://t.me/highreverse"},
+    {"chat_id": "@StandRazval", "title": "StandRazval", "url": "https://t.me/StandRazval"},
+]
+
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
+
+
+# ================= ПРОВЕРКА ПОДПИСКИ =================
+async def get_unsubscribed_channels(user_id: int) -> list[dict]:
+    if user_id in ADMIN_IDS:
+        return []
+
+    not_subscribed = []
+    allowed_statuses = {
+        ChatMemberStatus.MEMBER,
+        ChatMemberStatus.ADMINISTRATOR,
+        ChatMemberStatus.CREATOR,
+    }
+    for ch in REQUIRED_CHANNELS:
+        try:
+            member = await bot.get_chat_member(chat_id=ch["chat_id"], user_id=user_id)
+            if member.status not in allowed_statuses:
+                not_subscribed.append(ch)
+        except Exception as e:
+            logging.error(f"Ошибка проверки подписки на {ch['chat_id']} для {user_id}: {e}")
+            not_subscribed.append(ch)
+    return not_subscribed
+
+
+def subscribe_kb(channels: list[dict]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"📢 Подписаться на {ch['title']}", url=ch["url"])]
+        for ch in channels
+    ]
+    rows.append([InlineKeyboardButton(text="✅ Проверить подписку", callback_data="check_sub")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+class SubscriptionMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any],
+    ) -> Any:
+        user = data.get("event_from_user")
+        if not user or user.is_bot:
+            return await handler(event, data)
+
+        # Пропускаем сам коллбэк кнопки "Проверить подписку", чтобы обработать его отдельно
+        if isinstance(event, CallbackQuery) and event.data == "check_sub":
+            return await handler(event, data)
+
+        not_sub = await get_unsubscribed_channels(user.id)
+        if not_sub:
+            text = (
+                "🔒 <b>Доступ к боту ограничен!</b>\n\n"
+                "Для использования бота необходимо подписаться на наши Telegram-каналы:\n"
+                + "\n".join(f"• <a href='{ch['url']}'>{ch['title']}</a>" for ch in not_sub)
+                + "\n\nПосле подписки нажми кнопку <b>«✅ Проверить подписку»</b> ниже:"
+            )
+            if isinstance(event, Message):
+                await event.answer(text, reply_markup=subscribe_kb(not_sub), disable_web_page_preview=True)
+            elif isinstance(event, CallbackQuery):
+                await event.answer("Сначала подпишись на обязательные каналы!", show_alert=True)
+                if event.message:
+                    await event.message.answer(text, reply_markup=subscribe_kb(not_sub), disable_web_page_preview=True)
+            return
+
+        return await handler(event, data)
+
+
+dp.update.outer_middleware(SubscriptionMiddleware())
+
+
+@router.callback_query(F.data == "check_sub")
+async def callback_check_sub(callback: CallbackQuery, state: FSMContext):
+    not_sub = await get_unsubscribed_channels(callback.from_user.id)
+    if not_sub:
+        await callback.answer("❌ Ты подписался ещё не на все каналы!", show_alert=True)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=subscribe_kb(not_sub))
+        except Exception:
+            pass
+        return
+
+    await state.clear()
+    save_user(callback.from_user.id, callback.from_user.username, callback.from_user.full_name)
+    await callback.answer("✅ Подписка подтверждена!")
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.message.answer(
+        "✅ <b>Спасибо за подписку! Доступ к боту открыт.</b>\n\n"
+        "Выбери нужное действие в меню ниже:",
+        reply_markup=main_menu_kb(callback.from_user.id),
+    )
 
 
 # ================= БАЗА ДАННЫХ (SQLite) =================
