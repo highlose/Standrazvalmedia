@@ -23,13 +23,11 @@ from aiogram.types import (
 
 # ================= КОНФИГУРАЦИЯ (ДЛЯ RAILWAY) =================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "ВСТАВЬ_СЮДА_ТОКЕН_БОТА")
-# ID админа (или нескольких через запятую в ENV: "123456789,987654321")
 ADMIN_IDS = [
     int(x.strip())
     for x in os.getenv("ADMIN_IDS", "123456789").split(",")
     if x.strip().isdigit()
 ]
-# Путь к БД (если на Railway подключен Volume, укажи например /data/standrazval.db)
 DB_PATH = os.getenv("DB_PATH", "standrazval.db")
 
 # Обязательный канал для подписки (бот должен быть админом в этом канале!)
@@ -82,11 +80,11 @@ class SubscriptionMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: Dict[str, Any],
     ) -> Any:
-        user = data.get("event_from_user")
+        user = getattr(event, "from_user", None)
         if not user or user.is_bot:
             return await handler(event, data)
 
-        # Пропускаем сам коллбэк кнопки "Проверить подписку", чтобы обработать его отдельно
+        # Пропускаем кнопку "Проверить подписку", её обрабатывает отдельный хендлер
         if isinstance(event, CallbackQuery) and event.data == "check_sub":
             return await handler(event, data)
 
@@ -108,7 +106,9 @@ class SubscriptionMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
-dp.update.outer_middleware(SubscriptionMiddleware())
+# Вешаем middleware именно на message и callback_query (а не на raw update)
+dp.message.outer_middleware(SubscriptionMiddleware())
+dp.callback_query.outer_middleware(SubscriptionMiddleware())
 
 
 @router.callback_query(F.data == "check_sub")
