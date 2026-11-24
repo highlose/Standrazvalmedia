@@ -35,7 +35,6 @@ DB_PATH = os.getenv("DB_PATH", "standrazval.db")
 # Обязательные каналы для подписки (бот должен быть админом в этих каналах!)
 REQUIRED_CHANNELS = [
     {"chat_id": "@highreverse", "title": "highreverse", "url": "https://t.me/highreverse"},
-    {"chat_id": "@StandRazval", "title": "StandRazval", "url": "https://t.me/StandRazval"},
 ]
 
 logging.basicConfig(level=logging.INFO)
