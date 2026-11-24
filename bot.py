@@ -32,9 +32,9 @@ ADMIN_IDS = [
 # Путь к БД (если на Railway подключен Volume, укажи например /data/standrazval.db)
 DB_PATH = os.getenv("DB_PATH", "standrazval.db")
 
-# Обязательные каналы для подписки (бот должен быть админом в этих каналах!)
+# Обязательный канал для подписки (бот должен быть админом в этом канале!)
 REQUIRED_CHANNELS = [
-    {"chat_id": "@highreverse", "title": "highreverse", "url": "https://t.me/highreverse"},
+    {"chat_id": "@highreverse", "title": "highlose", "url": "https://t.me/highreverse"},
 ]
 
 logging.basicConfig(level=logging.INFO)
@@ -94,14 +94,13 @@ class SubscriptionMiddleware(BaseMiddleware):
         if not_sub:
             text = (
                 "🔒 <b>Доступ к боту ограничен!</b>\n\n"
-                "Для использования бота необходимо подписаться на наши Telegram-каналы:\n"
-                + "\n".join(f"• <a href='{ch['url']}'>{ch['title']}</a>" for ch in not_sub)
-                + "\n\nПосле подписки нажми кнопку <b>«✅ Проверить подписку»</b> ниже:"
+                "Для использования бота нужно быть подписанным на канал <b>highlose</b>.\n\n"
+                "Подпишись по кнопке ниже и нажми <b>«✅ Проверить подписку»</b>:"
             )
             if isinstance(event, Message):
                 await event.answer(text, reply_markup=subscribe_kb(not_sub), disable_web_page_preview=True)
             elif isinstance(event, CallbackQuery):
-                await event.answer("Сначала подпишись на обязательные каналы!", show_alert=True)
+                await event.answer("Сначала подпишись на канал highlose!", show_alert=True)
                 if event.message:
                     await event.message.answer(text, reply_markup=subscribe_kb(not_sub), disable_web_page_preview=True)
             return
@@ -116,7 +115,7 @@ dp.update.outer_middleware(SubscriptionMiddleware())
 async def callback_check_sub(callback: CallbackQuery, state: FSMContext):
     not_sub = await get_unsubscribed_channels(callback.from_user.id)
     if not_sub:
-        await callback.answer("❌ Ты подписался ещё не на все каналы!", show_alert=True)
+        await callback.answer("❌ Ты ещё не подписался на канал highlose!", show_alert=True)
         try:
             await callback.message.edit_reply_markup(reply_markup=subscribe_kb(not_sub))
         except Exception:
